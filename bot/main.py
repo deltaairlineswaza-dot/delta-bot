@@ -44,6 +44,7 @@ DIVIDER_URL = (
 TICKET_CATEGORY_ID      = 1524489811627475075
 STAFF_ROLE_ID           = 1436474227971592325
 GENERAL_SUPPORT_ROLE_ID = 1436480867240251493
+TRANSCRIPT_CHANNEL_ID   = 1524489806711754752
 
 # Each key maps to a ticket category. Add new rows here to add new categories.
 TICKET_CONFIG: dict[str, dict] = {
@@ -302,41 +303,91 @@ def can_close_ticket(member: discord.Member, channel: discord.TextChannel) -> bo
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# INTERNAL CLOSE HELPER
+# TRANSCRIPT + FINALIZE HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def _close_ticket(
-    interaction: discord.Interaction,
+async def generate_transcript(channel: discord.TextChannel) -> str:
+    """Fetch all messages and return them as a formatted string."""
+    lines: list[str] = [
+        f"═══════════════════════════════════════════════════════",
+        f"  DELTA AIR LINES — TICKET TRANSCRIPT",
+        f"  Channel : #{channel.name}",
+        f"  ID      : {channel.id}",
+        f"═══════════════════════════════════════════════════════\n",
+    ]
+    messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
+    for msg in messages:
+        ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        content = msg.content or ""
+        if msg.embeds:
+            for emb in msg.embeds:
+                title = emb.title or ""
+                desc  = emb.description or ""
+                content += f"\n[EMBED] {title}\n{desc}"
+        if msg.attachments:
+            for att in msg.attachments:
+                content += f"\n[ATTACHMENT] {att.url}"
+        lines.append(f"[{ts}] {msg.author} ({msg.author.id}): {content}")
+    return "\n".join(lines)
+
+
+async def _finalize_ticket(
     channel: discord.TextChannel,
     closer: discord.Member,
-    reason: str = "No reason provided.",
+    reason: str,
+    rating: int | None,
 ) -> None:
+    """Generate transcript, send to log channel, DM user, delete channel."""
+    guild = channel.guild
+
+    # Find ticket owner from topic
     topic = channel.topic or ""
     owner: discord.Member | None = None
     for part in topic.split():
         if part.isdigit():
-            owner = channel.guild.get_member(int(part))
+            owner = guild.get_member(int(part))
             break
 
-    # Closing embed shown in channel
-    embed = _base_embed(
-        title="🔒  Ticket Closing",
-        description=(
-            "This ticket has been marked as **closed** and will be deleted in 5 seconds.\n\n"
-            f"**Reason:** {reason}\n\n"
-            "Thank you for contacting Delta Air Lines Support."
-        ),
+    # Generate transcript text
+    transcript_text = await generate_transcript(channel)
+    rating_line = f"{rating} / 5 ⭐" if rating is not None else "No rating given"
+    transcript_text += (
+        f"\n\n═══════════════════════════════════════════════════════"
+        f"\n  CLOSE REASON : {reason}"
+        f"\n  RATING       : {rating_line}"
+        f"\n  CLOSED BY    : {closer} ({closer.id})"
+        f"\n═══════════════════════════════════════════════════════"
     )
-    embed.set_image(url=DIVIDER_URL)
-    await interaction.response.send_message(embed=embed, ephemeral=False)
 
-    # DM the owner with reason
+    # Send to transcript log channel
+    log_channel = guild.get_channel(TRANSCRIPT_CHANNEL_ID)
+    if isinstance(log_channel, discord.TextChannel):
+        stars = "⭐" * rating if rating else "—"
+        log_embed = _base_embed(
+            title="📋  Ticket Transcript",
+            description=(
+                f"**Channel:** #{channel.name}\n"
+                f"**Opened by:** {owner.mention if owner else 'Unknown'}\n"
+                f"**Closed by:** {closer.mention}\n"
+                f"**Reason:** {reason}\n"
+                f"**Rating:** {stars} ({rating_line})"
+            ),
+        )
+        log_embed.set_image(url=DIVIDER_URL)
+        file = discord.File(
+            fp=__import__("io").BytesIO(transcript_text.encode()),
+            filename=f"transcript-{channel.name}.txt",
+        )
+        await log_channel.send(embed=log_embed, file=file)
+
+    # DM the owner
     if owner is not None:
         dm_embed = _base_embed(
             title="🔒  Ticket Closed",
             description=(
-                f"Your support ticket **#{channel.name}** has been successfully closed.\n\n"
-                f"**Reason:** {reason}\n\n"
+                f"Your support ticket **#{channel.name}** has been closed.\n\n"
+                f"**Reason:** {reason}\n"
+                f"**Your rating:** {rating_line}\n\n"
                 "Thank you for contacting **Delta Air Lines Support**. "
                 "If you need further assistance, please open a new ticket.\n\n"
                 "*Delta Air Lines — Keep Climbing.*"
@@ -349,9 +400,9 @@ async def _close_ticket(
         except discord.Forbidden:
             pass
 
-    await asyncio.sleep(5)
+    await asyncio.sleep(3)
     try:
-        await channel.delete(reason=f"Ticket closed by {closer} ({closer.id}): {reason}")
+        await channel.delete(reason=f"Ticket closed by {closer}: {reason}")
     except discord.NotFound:
         pass
 
@@ -375,12 +426,114 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines
         self._closer  = closer
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await _close_ticket(
-            interaction,
-            self._channel,
-            self._closer,
+        # Acknowledge the modal immediately
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
+            embed=success_embed("Closing in progress — please wait."),
+            ephemeral=True,
+        )
+
+        # Post rating prompt in the ticket channel (60 s window)
+        rating_embed = _base_embed(
+            title="⭐  Rate Your Support Experience",
+            description=(
+                "Before this ticket closes, please rate your experience with "
+                "**Delta Air Lines Support**.\n\n"
+                "Select a star rating below. "
+                "The ticket will close automatically in **60 seconds**."
+            ),
+        )
+        rating_embed.set_image(url=DIVIDER_URL)
+        view = RatingView(
+            channel=self._channel,
+            closer=self._closer,
             reason=self.reason.value,
         )
+        await self._channel.send(embed=rating_embed, view=view)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RATING VIEW
+# ══════════════════════════════════════════════════════════════════════════════
+
+class RatingView(discord.ui.View):
+    """Star rating buttons shown in the ticket before it's deleted."""
+
+    STARS = [
+        ("1 ⭐", 1, discord.ButtonStyle.secondary),
+        ("2 ⭐", 2, discord.ButtonStyle.secondary),
+        ("3 ⭐", 3, discord.ButtonStyle.secondary),
+        ("4 ⭐", 4, discord.ButtonStyle.success),
+        ("5 ⭐", 5, discord.ButtonStyle.success),
+    ]
+
+    def __init__(
+        self,
+        channel: discord.TextChannel,
+        closer: discord.Member,
+        reason: str,
+    ) -> None:
+        super().__init__(timeout=60)
+        self._channel = channel
+        self._closer  = closer
+        self._reason  = reason
+        self._rated   = False
+
+        for label, value, style in self.STARS:
+            button: discord.ui.Button = discord.ui.Button(
+                label=label, style=style, custom_id=f"delta:rating:{value}"
+            )
+            button.callback = self._make_callback(value)
+            self.add_item(button)
+
+    def _make_callback(self, stars: int):
+        async def callback(interaction: discord.Interaction) -> None:
+            if self._rated:
+                await interaction.response.send_message(
+                    embed=error_embed("This ticket has already been rated."),
+                    ephemeral=True,
+                )
+                return
+
+            # Only ticket owner or staff can rate
+            member = interaction.user
+            topic  = self._channel.topic or ""
+            is_owner = isinstance(member, discord.Member) and str(member.id) in topic
+            staff    = isinstance(member, discord.Member) and is_staff(member)
+            if not (is_owner or staff):
+                await interaction.response.send_message(
+                    embed=error_embed("Only the ticket owner can submit a rating."),
+                    ephemeral=True,
+                )
+                return
+
+            self._rated = True
+            self.stop()
+            await interaction.response.defer()
+
+            confirm = _base_embed(
+                title="✅  Rating Submitted",
+                description=f"Thank you! You rated this ticket **{stars} / 5 ⭐**.\nThis channel will be deleted shortly.",
+            )
+            confirm.set_image(url=DIVIDER_URL)
+            await self._channel.send(embed=confirm)
+            await _finalize_ticket(self._channel, self._closer, self._reason, rating=stars)
+
+        return callback
+
+    async def on_timeout(self) -> None:
+        if not self._rated:
+            self._rated = True
+            try:
+                timeout_embed = _base_embed(
+                    title="⏱️  Rating Timed Out",
+                    description="No rating was submitted. Closing ticket now.",
+                )
+                timeout_embed.set_image(url=DIVIDER_URL)
+                await self._channel.send(embed=timeout_embed)
+            except discord.NotFound:
+                pass
+            await _finalize_ticket(self._channel, self._closer, self._reason, rating=None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
