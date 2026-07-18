@@ -309,6 +309,7 @@ async def _close_ticket(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
     closer: discord.Member,
+    reason: str = "No reason provided.",
 ) -> None:
     topic = channel.topic or ""
     owner: discord.Member | None = None
@@ -317,29 +318,126 @@ async def _close_ticket(
             owner = channel.guild.get_member(int(part))
             break
 
-    await interaction.response.send_message(embed=ticket_closed_channel(), ephemeral=False)
+    # Closing embed shown in channel
+    embed = _base_embed(
+        title="🔒  Ticket Closing",
+        description=(
+            "This ticket has been marked as **closed** and will be deleted in 5 seconds.\n\n"
+            f"**Reason:** {reason}\n\n"
+            "Thank you for contacting Delta Air Lines Support."
+        ),
+    )
+    embed.set_image(url=DIVIDER_URL)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
+    # DM the owner with reason
     if owner is not None:
+        dm_embed = _base_embed(
+            title="🔒  Ticket Closed",
+            description=(
+                f"Your support ticket **#{channel.name}** has been successfully closed.\n\n"
+                f"**Reason:** {reason}\n\n"
+                "Thank you for contacting **Delta Air Lines Support**. "
+                "If you need further assistance, please open a new ticket.\n\n"
+                "*Delta Air Lines — Keep Climbing.*"
+            ),
+        )
+        dm_embed.add_field(name="📬 Mailing Address", value=MAILING_ADDRESS, inline=False)
+        dm_embed.set_image(url=DIVIDER_URL)
         try:
-            await owner.send(embed=ticket_closed_dm(channel.name))
+            await owner.send(embed=dm_embed)
         except discord.Forbidden:
             pass
 
     await asyncio.sleep(5)
     try:
-        await channel.delete(reason=f"Ticket closed by {closer} ({closer.id})")
+        await channel.delete(reason=f"Ticket closed by {closer} ({closer.id}): {reason}")
     except discord.NotFound:
         pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODALS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines"):
+    reason = discord.ui.TextInput(
+        label="Reason for closing",
+        placeholder="e.g. Issue resolved, No response from user...",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True,
+    )
+
+    def __init__(self, channel: discord.TextChannel, closer: discord.Member) -> None:
+        super().__init__()
+        self._channel = channel
+        self._closer  = closer
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await _close_ticket(
+            interaction,
+            self._channel,
+            self._closer,
+            reason=self.reason.value,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VIEWS (UI COMPONENTS)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class CloseTicketButton(discord.ui.View):
+class TicketActionView(discord.ui.View):
+    """Persistent view with Claim and Close buttons attached to every ticket."""
+
     def __init__(self) -> None:
         super().__init__(timeout=None)
 
+    # ── Claim ────────────────────────────────────────────────────────────────
+    @discord.ui.button(
+        label="🙋  Claim Ticket",
+        style=discord.ButtonStyle.primary,
+        custom_id="delta:claim_ticket",
+    )
+    async def claim_ticket(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message(
+                embed=error_embed("Unable to verify your permissions."),
+                ephemeral=True,
+            )
+            return
+
+        if not is_staff(member):
+            await interaction.response.send_message(
+                embed=error_embed("Only staff members can claim tickets."),
+                ephemeral=True,
+            )
+            return
+
+        # Ephemeral confirm for the claimant
+        await interaction.response.send_message(
+            embed=success_embed("You have claimed this ticket."),
+            ephemeral=True,
+        )
+
+        # Public claim embed in the channel
+        embed = _base_embed(
+            title="🙋  Ticket Claimed",
+            description=(
+                f"This ticket has been claimed by {member.mention}.\n\n"
+                "They will be assisting you shortly — "
+                "please continue describing your issue."
+            ),
+        )
+        embed.set_image(url=DIVIDER_URL)
+        await interaction.channel.send(embed=embed)
+
+    # ── Close ────────────────────────────────────────────────────────────────
     @discord.ui.button(
         label="🔒  Close Ticket",
         style=discord.ButtonStyle.danger,
@@ -374,7 +472,11 @@ class CloseTicketButton(discord.ui.View):
             )
             return
 
-        await _close_ticket(interaction, channel, member)
+        await interaction.response.send_modal(CloseReasonModal(channel, member))
+
+
+# Keep old name as alias so existing persistent views still resolve
+CloseTicketButton = TicketActionView
 
 
 class AssistanceSelect(discord.ui.Select):
@@ -445,7 +547,7 @@ class AssistanceSelect(discord.ui.Select):
         else:
             embed = generic_ticket_welcome(member, cfg["label"], cfg["emoji"])
 
-        await channel.send(embed=embed, view=CloseTicketButton())
+        await channel.send(embed=embed, view=TicketActionView())
         await interaction.followup.send(
             content=f"✅  Your ticket has been created: {channel.mention}",
             ephemeral=True,
@@ -522,7 +624,7 @@ def register_commands(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        await _close_ticket(interaction, channel, member)
+        await interaction.response.send_modal(CloseReasonModal(channel, member))
 
     # /connected
     @tree.command(name="connected", description="Notify the user that an agent has connected (staff only).")
@@ -621,7 +723,7 @@ class DeltaBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.add_view(AssistancePanelView())
-        self.add_view(CloseTicketButton())
+        self.add_view(TicketActionView())
         register_commands(self.tree)
         synced = await self.tree.sync()
         log.info("Synced %d application command(s).", len(synced))
