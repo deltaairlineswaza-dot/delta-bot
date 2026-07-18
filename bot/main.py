@@ -428,28 +428,54 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # Acknowledge the modal immediately
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(
-            embed=success_embed("Closing in progress — please wait."),
-            ephemeral=True,
-        )
 
-        # Post rating prompt in the ticket channel (60 s window)
-        rating_embed = _base_embed(
-            title="⭐  Rate Your Support Experience",
-            description=(
-                "Before this ticket closes, please rate your experience with "
-                "**Delta Air Lines Support**.\n\n"
-                "Select a star rating below. "
-                "The ticket will close automatically in **60 seconds**."
-            ),
-        )
-        rating_embed.set_image(url=DIVIDER_URL)
+        # Find the ticket owner from the channel topic
+        topic = self._channel.topic or ""
+        owner: discord.Member | None = None
+        for part in topic.split():
+            if part.isdigit():
+                owner = self._channel.guild.get_member(int(part))
+                break
+
         view = RatingView(
             channel=self._channel,
             closer=self._closer,
             reason=self.reason.value,
         )
-        await self._channel.send(embed=rating_embed, view=view)
+
+        # Send rating prompt to the owner's DMs
+        dm_sent = False
+        if owner is not None:
+            rating_embed = _base_embed(
+                title="⭐  Rate Your Support Experience",
+                description=(
+                    f"Your support ticket **#{self._channel.name}** has been closed.\n\n"
+                    "Please rate your experience with **Delta Air Lines Support** "
+                    "by selecting a star rating below.\n\n"
+                    "You have **60 seconds** to submit your rating."
+                ),
+            )
+            rating_embed.set_image(url=DIVIDER_URL)
+            try:
+                await owner.send(embed=rating_embed, view=view)
+                dm_sent = True
+            except discord.Forbidden:
+                pass
+
+        if dm_sent:
+            await interaction.followup.send(
+                embed=success_embed("A rating request has been sent to the ticket owner via DM. The ticket will close once they respond (or after 60 seconds)."),
+                ephemeral=True,
+            )
+            # Post a brief closing notice in the channel — channel stays alive until rating/timeout
+            await self._channel.send(embed=ticket_closed_channel())
+        else:
+            # DMs disabled — finalize immediately without rating
+            await interaction.followup.send(
+                embed=success_embed("Closing in progress — please wait."),
+                ephemeral=True,
+            )
+            await _finalize_ticket(self._channel, self._closer, self.reason.value, rating=None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -495,11 +521,11 @@ class RatingView(discord.ui.View):
                 )
                 return
 
-            # Only ticket owner or staff can rate
-            member = interaction.user
-            topic  = self._channel.topic or ""
-            is_owner = isinstance(member, discord.Member) and str(member.id) in topic
-            staff    = isinstance(member, discord.Member) and is_staff(member)
+            # Works in both DM (User) and guild (Member) context
+            user  = interaction.user
+            topic = self._channel.topic or ""
+            is_owner = str(user.id) in topic
+            staff    = isinstance(user, discord.Member) and is_staff(user)
             if not (is_owner or staff):
                 await interaction.response.send_message(
                     embed=error_embed("Only the ticket owner can submit a rating."),
@@ -513,10 +539,15 @@ class RatingView(discord.ui.View):
 
             confirm = _base_embed(
                 title="✅  Rating Submitted",
-                description=f"Thank you! You rated this ticket **{stars} / 5 ⭐**.\nThis channel will be deleted shortly.",
+                description=(
+                    f"Thank you! You rated your support experience **{stars} / 5 ⭐**.\n\n"
+                    "Your ticket will now be closed. "
+                    "*Delta Air Lines — Keep Climbing.*"
+                ),
             )
             confirm.set_image(url=DIVIDER_URL)
-            await self._channel.send(embed=confirm)
+            # Send confirmation to the DM
+            await interaction.followup.send(embed=confirm)
             await _finalize_ticket(self._channel, self._closer, self._reason, rating=stars)
 
         return callback
@@ -524,15 +555,6 @@ class RatingView(discord.ui.View):
     async def on_timeout(self) -> None:
         if not self._rated:
             self._rated = True
-            try:
-                timeout_embed = _base_embed(
-                    title="⏱️  Rating Timed Out",
-                    description="No rating was submitted. Closing ticket now.",
-                )
-                timeout_embed.set_image(url=DIVIDER_URL)
-                await self._channel.send(embed=timeout_embed)
-            except discord.NotFound:
-                pass
             await _finalize_ticket(self._channel, self._closer, self._reason, rating=None)
 
 
