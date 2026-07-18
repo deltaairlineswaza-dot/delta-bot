@@ -1,45 +1,50 @@
-# [Project name]
+# Delta Air Lines HelpDesk Discord Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A professional Delta Air Lines branded Discord support bot built with discord.py 2.x.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+```bash
+cd bot
+pip install -r requirements.txt
+cp .env.example .env   # then fill in DISCORD_TOKEN
+python main.py
+```
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.10+, discord.py 2.3.2
+- python-dotenv for environment variable loading
 
-## Where things live
+## Where Things Live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+```
+bot/
+├── main.py      — Bot entry point, login, persistent view registration
+├── config.py    — All IDs, colours, branding constants (edit this to configure)
+├── embeds.py    — All Discord embed factory functions
+├── views.py     — UI: AssistancePanelView (dropdown), CloseTicketButton
+├── tickets.py   — Ticket close orchestration
+├── commands.py  — All slash commands (/assistance panel, /close, /connected, /resolved)
+└── utils.py     — Shared helpers (permission checks, channel creation, duplicate guard)
+```
 
-## Architecture decisions
+## Architecture Decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **Persistent views** (`timeout=None` + `add_view` in `setup_hook`) so buttons/dropdowns survive bot restarts.
+- **Ticket ownership stored in channel topic** (user ID string) — no database needed.
+- **`config.py` as single source of truth** for all IDs; adding a new ticket category only requires a new entry in `TICKET_CONFIG`.
+- **Staff-only commands guarded** with `app_commands.check` using `STAFF_ROLE_ID`.
+- **Ephemeral staff confirmations** — staff see "Message sent successfully", users see the full branded embed.
 
-## Product
+## User Preferences
 
-_Describe the high-level user-facing capabilities of this app once they exist._
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- All IDs and branding live in `config.py` for easy updates.
+- New ticket categories: add a row to `TICKET_CONFIG` in `config.py` — no other file changes needed.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Run `python main.py` from inside the `bot/` directory.
+- The bot needs **Server Members Intent** enabled in the Discord Developer Portal.
+- Slash commands can take up to 1 hour to propagate globally after first sync. Use guild-scoped sync during development (see comment in `main.py`).
+- `DISCORD_TOKEN` must be set in `.env` (copy `.env.example`).
