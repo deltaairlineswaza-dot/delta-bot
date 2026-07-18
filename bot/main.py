@@ -920,9 +920,16 @@ def run_health_server() -> None:
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            body = b"Delta Air Lines HelpDesk is online."
             self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b"Delta Air Lines HelpDesk is online.")
+            self.wfile.write(body)
+
+        def do_HEAD(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "36")
+            self.end_headers()
 
         def log_message(self, *args) -> None:
             pass  # Silence HTTP access logs
