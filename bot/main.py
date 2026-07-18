@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import discord
 from discord import app_commands
@@ -635,12 +637,35 @@ class DeltaBot(commands.Bot):
         )
 
 
+def run_health_server() -> None:
+    """Tiny HTTP server so Render's free Web Service sees an open port."""
+    port = int(os.getenv("PORT", "8080"))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Delta Air Lines HelpDesk is online.")
+
+        def log_message(self, *args) -> None:
+            pass  # Silence HTTP access logs
+
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+
 def main() -> None:
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise RuntimeError(
             "DISCORD_TOKEN is not set. Copy .env.example to .env and fill in your bot token."
         )
+
+    # Start the health-check server in a background thread
+    thread = threading.Thread(target=run_health_server, daemon=True)
+    thread.start()
+    log.info("Health-check server started.")
+
     bot = DeltaBot()
     bot.run(token, log_handler=None)
 
