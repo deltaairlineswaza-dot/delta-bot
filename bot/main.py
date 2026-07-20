@@ -43,7 +43,7 @@ DIVIDER_URL = (
 
 TICKET_CATEGORY_ID      = 1524489811627475075
 STAFF_ROLE_ID           = 1436474227971592325
-GENERAL_SUPPORT_ROLE_ID = 1436480867240251493
+GENERAL_SUPPORT_ROLE_ID = 1520094641305817278
 TRANSCRIPT_CHANNEL_ID   = 1524489806711754752
 
 # Each key maps to a ticket category. Add new rows here to add new categories.
@@ -273,7 +273,17 @@ async def create_ticket_channel(
             read_message_history=True,
         ),
     }
-    if support_role is not None:
+    # Always give the staff role access to every ticket
+    staff_role = guild.get_role(STAFF_ROLE_ID)
+    if staff_role is not None:
+        overwrites[staff_role] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True,
+        )
+    # Also add the category-specific support role if it differs from staff
+    if support_role is not None and support_role.id != STAFF_ROLE_ID:
         overwrites[support_role] = discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
