@@ -919,16 +919,106 @@ def run_health_server() -> None:
     port = int(os.getenv("PORT", "8080"))
 
     class Handler(BaseHTTPRequestHandler):
+        _HTML = b"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delta Air Lines HelpDesk &mdash; Status</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+    }
+    .card {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 40px 48px;
+      text-align: center;
+      max-width: 440px;
+      width: 90%;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #0f2e1a;
+      color: #4ade80;
+      border: 1px solid #166534;
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+    .airline {
+      color: #C8102E;
+      font-weight: 800;
+    }
+    p {
+      font-size: 14px;
+      color: #888;
+      line-height: 1.6;
+    }
+    .divider {
+      height: 3px;
+      background: linear-gradient(90deg, #C8102E, #003087);
+      border-radius: 2px;
+      margin-top: 28px;
+    }
+    footer {
+      font-size: 12px;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge"><span class="dot"></span>All Systems Operational</div>
+    <h1><span class="airline">Delta Air Lines</span><br>HelpDesk Bot</h1>
+    <p>The Discord support bot is running and actively serving tickets.<br>Keep Climbing.</p>
+    <div class="divider"></div>
+  </div>
+  <footer>Delta Air Lines &mdash; Automated Service Monitor</footer>
+</body>
+</html>"""
+
         def do_GET(self) -> None:
-            body = b"Delta Air Lines HelpDesk is online."
             self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(self._HTML)))
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(self._HTML)
 
         def do_HEAD(self) -> None:
             self.send_response(200)
-            self.send_header("Content-Length", "36")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(self._HTML)))
             self.end_headers()
 
         def log_message(self, *args) -> None:
