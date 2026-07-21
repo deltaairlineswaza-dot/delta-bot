@@ -134,7 +134,7 @@ def assistance_panel_embed() -> discord.Embed:
 
 def general_inquiries_welcome(member: discord.Member) -> discord.Embed:
     embed = _base_embed(
-        title="📋  General Inquiries — Support Ticket",
+        title="📋  General Inquiries | Support Ticket",
         description=(
             f"Welcome, {member.mention}! Thank you for reaching out to "
             "**Delta Air Lines Support**.\n\n"
@@ -154,7 +154,7 @@ def general_inquiries_welcome(member: discord.Member) -> discord.Embed:
 
 def generic_ticket_welcome(member: discord.Member, label: str, emoji: str) -> discord.Embed:
     embed = _base_embed(
-        title=f"{emoji}  {label} — Support Ticket",
+        title=f"{emoji}  {label} | Support Ticket",
         description=(
             f"Welcome, {member.mention}! Thank you for contacting "
             "**Delta Air Lines Support**.\n\n"
@@ -273,7 +273,7 @@ async def create_ticket_channel(
             read_message_history=True,
         ),
     }
-    # Always give the staff role access to every ticket
+    # Leadership always gets full admin on every ticket
     staff_role = guild.get_role(STAFF_ROLE_ID)
     if staff_role is not None:
         overwrites[staff_role] = discord.PermissionOverwrite(
@@ -281,8 +281,10 @@ async def create_ticket_channel(
             send_messages=True,
             read_message_history=True,
             manage_channels=True,
+            manage_permissions=True,
+            manage_messages=True,
         )
-    # Also add the category-specific support role if it differs from staff
+    # Also add the category-specific support role if it differs from leadership
     if support_role is not None and support_role.id != STAFF_ROLE_ID:
         overwrites[support_role] = discord.PermissionOverwrite(
             view_channel=True,
@@ -597,9 +599,18 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        if not is_staff(member):
+        # Allow leadership and any support role member who has access to this channel
+        channel = interaction.channel
+        topic   = (channel.topic or "") if isinstance(channel, discord.TextChannel) else ""
+        is_owner = str(member.id) in topic
+        can_claim = (
+            is_staff(member)
+            or any(r.id == GENERAL_SUPPORT_ROLE_ID for r in member.roles)
+            or (isinstance(channel, discord.TextChannel) and channel.permissions_for(member).manage_channels)
+        )
+        if is_owner or not can_claim:
             await interaction.response.send_message(
-                embed=error_embed("Only staff members can claim tickets."),
+                embed=error_embed("Only support team members can claim tickets."),
                 ephemeral=True,
             )
             return
@@ -867,6 +878,48 @@ def register_commands(tree: app_commands.CommandTree) -> None:
             color=DELTA_RED,
         )
         embed.set_footer(text=FOOTER_TEXT)
+        await channel.send(embed=embed)
+
+    # /revoke — leadership only: remove a user's access from a ticket channel
+    @tree.command(name="revoke", description="Revoke a user's access to this ticket (leadership only).")
+    @staff_only()
+    @app_commands.describe(user="The member to remove from this ticket.")
+    async def revoke(interaction: discord.Interaction, user: discord.Member) -> None:
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                embed=error_embed("This command must be used inside a ticket channel."),
+                ephemeral=True,
+            )
+            return
+
+        # Prevent revoking the ticket owner
+        topic = channel.topic or ""
+        if str(user.id) in topic:
+            await interaction.response.send_message(
+                embed=error_embed("You cannot revoke the ticket owner's access."),
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await channel.set_permissions(user, overwrite=None, reason=f"Access revoked by {interaction.user}")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                embed=error_embed("I don't have permission to manage this channel's permissions."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=success_embed(f"{user.mention}'s access to this ticket has been revoked."),
+            ephemeral=True,
+        )
+        embed = _base_embed(
+            title="🚫  Access Revoked",
+            description=f"{user.mention} has had their access to this ticket removed by {interaction.user.mention}.",
+        )
+        embed.set_image(url=DIVIDER_URL)
         await channel.send(embed=embed)
 
     # Global error handler
