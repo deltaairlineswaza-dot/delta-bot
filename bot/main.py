@@ -463,8 +463,7 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines
                 description=(
                     f"Your support ticket **#{self._channel.name}** has been closed.\n\n"
                     "Please rate your experience with **Delta Air Lines Support** "
-                    "by selecting a star rating below.\n\n"
-                    "You have **60 seconds** to submit your rating."
+                    "by selecting a star rating below."
                 ),
             )
             rating_embed.set_image(url=DIVIDER_URL)
@@ -511,7 +510,7 @@ class RatingView(discord.ui.View):
         closer: discord.Member,
         reason: str,
     ) -> None:
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self._channel = channel
         self._closer  = closer
         self._reason  = reason
@@ -564,10 +563,6 @@ class RatingView(discord.ui.View):
 
         return callback
 
-    async def on_timeout(self) -> None:
-        if not self._rated:
-            self._rated = True
-            await _finalize_ticket(self._channel, self._closer, self._reason, rating=None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
