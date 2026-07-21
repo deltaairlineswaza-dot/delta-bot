@@ -734,11 +734,11 @@ class AssistanceSelect(discord.ui.Select):
 
         support_role = guild.get_role(cfg["role_id"])
         staff_role   = guild.get_role(STAFF_ROLE_ID)
+        # Always ping: user, the category support role, and leadership
         parts = [member.mention]
         if support_role:
             parts.append(support_role.mention)
-        # Always ping leadership/staff on every ticket (avoid duplicate if it's already the support role)
-        if staff_role and (support_role is None or staff_role.id != support_role.id):
+        if staff_role:
             parts.append(staff_role.mention)
         await channel.send(" ".join(parts))
 
