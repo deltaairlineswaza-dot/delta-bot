@@ -873,6 +873,9 @@ def register_commands(tree: app_commands.CommandTree) -> None:
             )
             return
 
+        # Post the banner first
+        await updates_channel.send(embed=assistance_panel_banner_embed())
+
         # Create and send the update embed
         update_embed = _base_embed(title=f"🤖  {title}", description=update)
         update_embed.add_field(
@@ -1039,7 +1042,7 @@ def register_commands(tree: app_commands.CommandTree) -> None:
             )
 
 
-# ════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════���════════════════════════════════════════════════════════════
 # BOT CLASS & ENTRY POINT
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -1075,6 +1078,65 @@ class DeltaBot(commands.Bot):
                 name="✈️  Delta Air Lines Support",
             )
         )
+        
+        # Post deployment update to updates channel
+        await post_deployment_update()
+
+
+async def post_deployment_update() -> None:
+    """Automatically post a deployment update to the updates channel."""
+    try:
+        # Small delay to ensure bot is fully ready
+        await asyncio.sleep(2)
+        
+        # Get the bot instance through discord.ext.commands
+        bot = commands.Bot.instance() if hasattr(commands.Bot, 'instance') else None
+        if bot is None:
+            # Try to get from the global scope
+            for obj in list(globals().values()):
+                if isinstance(obj, DeltaBot):
+                    bot = obj
+                    break
+        
+        if bot is None or not bot.user:
+            log.warning("Could not post deployment update: bot instance not found")
+            return
+        
+        # Find a guild to get the updates channel
+        guild = None
+        for g in bot.guilds:
+            guild = g
+            break
+        
+        if guild is None:
+            log.warning("Bot is not in any guilds yet")
+            return
+        
+        updates_channel = guild.get_channel(UPDATES_CHANNEL_ID)
+        if not isinstance(updates_channel, discord.TextChannel):
+            log.warning(f"Updates channel {UPDATES_CHANNEL_ID} not found or not a text channel")
+            return
+        
+        # Post the banner
+        await updates_channel.send(embed=assistance_panel_banner_embed())
+        
+        # Post the deployment update
+        deploy_embed = _base_embed(
+            title="🚀  Bot Deployed",
+            description=(
+                "The **Delta Air Lines HelpDesk Bot** has been deployed successfully.\n\n"
+                "✅ All systems operational\n"
+                "✅ Commands synced and ready\n\n"
+                "*Thank you for flying with Delta Air Lines — Keep Climbing.*"
+            ),
+        )
+        deploy_embed.set_image(url=DIVIDER_URL)
+        
+        await updates_channel.send(embed=deploy_embed)
+        log.info("Deployment update posted to updates channel")
+        
+    except Exception as exc:
+        log.warning(f"Failed to post deployment update: {exc}")
 
 
 def run_health_server() -> None:
