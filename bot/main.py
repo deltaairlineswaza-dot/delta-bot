@@ -102,7 +102,7 @@ TICKET_CONFIG: dict[str, dict] = {
 
 # ════════════════════════════════════════════════════════════════════════════════
 # EMBEDS
-# ═════���══════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def _base_embed(title: str = "", description: str = "") -> discord.Embed:
     embed = discord.Embed(title=title, description=description, color=DELTA_RED)
@@ -839,6 +839,62 @@ def register_commands(tree: app_commands.CommandTree) -> None:
         await channel.send(embed=assistance_panel_embed(), view=AssistancePanelView())
 
     tree.add_command(assistance_group)
+
+    # /bot-updates
+    bot_updates_group = app_commands.Group(
+        name="bot-updates",
+        description="Post bot updates to the updates channel (staff only).",
+    )
+
+    @bot_updates_group.command(name="post", description="Post a bot update announcement.")
+    @staff_only()
+    @app_commands.describe(
+        title="Update title (e.g., Feature Release, Bug Fix)",
+        update="Detailed description of the update",
+    )
+    async def post_bot_update(
+        interaction: discord.Interaction,
+        title: str,
+        update: str,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                embed=error_embed("This command must be used inside a server."),
+                ephemeral=True,
+            )
+            return
+
+        updates_channel = guild.get_channel(UPDATES_CHANNEL_ID)
+        if not isinstance(updates_channel, discord.TextChannel):
+            await interaction.response.send_message(
+                embed=error_embed(f"Updates channel not found (ID: {UPDATES_CHANNEL_ID})."),
+                ephemeral=True,
+            )
+            return
+
+        # Create and send the update embed
+        update_embed = _base_embed(title=f"🤖  {title}", description=update)
+        update_embed.add_field(
+            name="📋 Posted By",
+            value=f"{interaction.user.mention}",
+            inline=False,
+        )
+        update_embed.set_image(url=DIVIDER_URL)
+
+        try:
+            await updates_channel.send(embed=update_embed)
+            await interaction.response.send_message(
+                embed=success_embed(f"✅ Update posted to {updates_channel.mention}"),
+                ephemeral=True,
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                embed=error_embed("I don't have permission to send messages in the updates channel."),
+                ephemeral=True,
+            )
+
+    tree.add_command(bot_updates_group)
 
     # /close
     @tree.command(name="close", description="Close the current support ticket.")
