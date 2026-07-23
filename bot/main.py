@@ -24,9 +24,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 DELTA_RED       = 0xC8102E
 FOOTER_TEXT     = "Delta Air Lines • Keep Climbing"
@@ -99,9 +99,9 @@ TICKET_CONFIG: dict[str, dict] = {
     },
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # EMBEDS
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def _base_embed(title: str = "", description: str = "") -> discord.Embed:
     embed = discord.Embed(title=title, description=description, color=DELTA_RED)
@@ -221,9 +221,9 @@ def success_embed(message: str) -> discord.Embed:
     return embed
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # UTILITIES
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def is_staff(member: discord.Member) -> bool:
     return any(role.id == STAFF_ROLE_ID for role in member.roles)
@@ -314,9 +314,9 @@ def can_close_ticket(member: discord.Member, channel: discord.TextChannel) -> bo
     return False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # TRANSCRIPT + FINALIZE HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 async def generate_transcript(channel: discord.TextChannel) -> str:
     """Fetch all messages and return them as a formatted string."""
@@ -419,9 +419,9 @@ async def _finalize_ticket(
         pass
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════��═══════════════════════════════════════════════════════════════════════
 # MODALS
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines"):
     reason = discord.ui.TextInput(
@@ -489,9 +489,9 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket — Delta Air Lines
             await _finalize_ticket(self._channel, self._closer, self.reason.value, rating=None)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # RATING VIEW
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 class RatingView(discord.ui.View):
     """Star rating buttons shown in the ticket before it's deleted."""
@@ -565,17 +565,19 @@ class RatingView(discord.ui.View):
 
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # VIEWS (UI COMPONENTS)
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 class TicketActionView(discord.ui.View):
-    """Persistent view with Claim and Close buttons attached to every ticket."""
+    """Persistent view with Claim/Unclaim and Close buttons attached to every ticket."""
 
     def __init__(self) -> None:
         super().__init__(timeout=None)
+        # Track claimed status: channel_id -> member_id
+        self._claimed: dict[int, int] = {}
 
-    # ── Claim ────────────────────────────────────────────────────────────────
+    # ── Claim / Unclaim ────────────────────────────────────────────────────────────
     @discord.ui.button(
         label="🙋  Claim Ticket",
         style=discord.ButtonStyle.primary,
@@ -587,6 +589,8 @@ class TicketActionView(discord.ui.View):
         button: discord.ui.Button,
     ) -> None:
         member = interaction.user
+        channel = interaction.channel
+        
         if not isinstance(member, discord.Member):
             await interaction.response.send_message(
                 embed=error_embed("Unable to verify your permissions."),
@@ -594,15 +598,25 @@ class TicketActionView(discord.ui.View):
             )
             return
 
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                embed=error_embed("This button can only be used inside a ticket channel."),
+                ephemeral=True,
+            )
+            return
+
+        # Check if already claimed by this user
+        is_claimed_by_user = self._claimed.get(channel.id) == member.id
+        
         # Allow leadership and any support role member who has access to this channel
-        channel = interaction.channel
-        topic   = (channel.topic or "") if isinstance(channel, discord.TextChannel) else ""
+        topic = channel.topic or ""
         is_owner = str(member.id) in topic
         can_claim = (
             is_staff(member)
             or any(r.id == GENERAL_SUPPORT_ROLE_ID for r in member.roles)
-            or (isinstance(channel, discord.TextChannel) and channel.permissions_for(member).manage_channels)
+            or channel.permissions_for(member).manage_channels
         )
+        
         if is_owner or not can_claim:
             await interaction.response.send_message(
                 embed=error_embed("Only support team members can claim tickets."),
@@ -610,25 +624,47 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        # Ephemeral confirm for the claimant
-        await interaction.response.send_message(
-            embed=success_embed("You have claimed this ticket."),
-            ephemeral=True,
-        )
+        # Toggle between claim and unclaim
+        if is_claimed_by_user:
+            # Unclaim
+            self._claimed.pop(channel.id, None)
+            button.label = "🙋  Claim Ticket"
+            button.style = discord.ButtonStyle.primary
+            
+            await interaction.response.send_message(
+                embed=success_embed("You have unclaimed this ticket."),
+                ephemeral=True,
+            )
+            
+            embed = _base_embed(
+                title="🔓  Ticket Unclaimed",
+                description=f"This ticket has been unclaimed by {member.mention}.",
+            )
+            embed.set_image(url=DIVIDER_URL)
+            await channel.send(embed=embed)
+        else:
+            # Claim
+            self._claimed[channel.id] = member.id
+            button.label = "🙋  Unclaim Ticket"
+            button.style = discord.ButtonStyle.secondary
+            
+            await interaction.response.send_message(
+                embed=success_embed("You have claimed this ticket."),
+                ephemeral=True,
+            )
+            
+            embed = _base_embed(
+                title="🙋  Ticket Claimed",
+                description=(
+                    f"This ticket has been claimed by {member.mention}.\n\n"
+                    "They will be assisting you shortly — "
+                    "please continue describing your issue."
+                ),
+            )
+            embed.set_image(url=DIVIDER_URL)
+            await channel.send(embed=embed)
 
-        # Public claim embed in the channel
-        embed = _base_embed(
-            title="🙋  Ticket Claimed",
-            description=(
-                f"This ticket has been claimed by {member.mention}.\n\n"
-                "They will be assisting you shortly — "
-                "please continue describing your issue."
-            ),
-        )
-        embed.set_image(url=DIVIDER_URL)
-        await interaction.channel.send(embed=embed)
-
-    # ── Close ────────────────────────────────────────────────────────────────
+    # ── Close ──────────────────────────────────────────────────────────────────────
     @discord.ui.button(
         label="🔒  Close Ticket",
         style=discord.ButtonStyle.danger,
@@ -729,13 +765,21 @@ class AssistanceSelect(discord.ui.Select):
 
         support_role = guild.get_role(cfg["role_id"])
         staff_role   = guild.get_role(STAFF_ROLE_ID)
-        # Always ping: user, the category support role, and leadership
-        parts = [member.mention]
-        if support_role:
-            parts.append(support_role.mention)
-        if staff_role:
-            parts.append(staff_role.mention)
-        await channel.send(" ".join(parts))
+        
+        # General Inquiries: only ping user and leadership
+        if selected_key == "general_inquiries":
+            parts = [member.mention]
+            if staff_role:
+                parts.append(staff_role.mention)
+            await channel.send(" ".join(parts))
+        else:
+            # All other categories: ping user, category support role, and leadership
+            parts = [member.mention]
+            if support_role:
+                parts.append(support_role.mention)
+            if staff_role:
+                parts.append(staff_role.mention)
+            await channel.send(" ".join(parts))
 
         if selected_key == "general_inquiries":
             embed = general_inquiries_welcome(member)
@@ -755,9 +799,9 @@ class AssistancePanelView(discord.ui.View):
         self.add_item(AssistanceSelect())
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # SLASH COMMANDS
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def staff_only() -> app_commands.check:
     async def predicate(interaction: discord.Interaction) -> bool:
@@ -938,9 +982,9 @@ def register_commands(tree: app_commands.CommandTree) -> None:
             )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # BOT CLASS & ENTRY POINT
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 logging.basicConfig(
     level=logging.INFO,
