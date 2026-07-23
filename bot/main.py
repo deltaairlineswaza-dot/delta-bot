@@ -45,6 +45,7 @@ TICKET_CATEGORY_ID      = 1524489811627475075
 STAFF_ROLE_ID           = 1520094641305817278
 GENERAL_SUPPORT_ROLE_ID = 1436480867240251493
 TRANSCRIPT_CHANNEL_ID   = 1524489806711754752
+UPDATES_CHANNEL_ID      = 1529943543593041990
 
 # Each key maps to a ticket category. Add new rows here to add new categories.
 TICKET_CONFIG: dict[str, dict] = {
@@ -101,7 +102,7 @@ TICKET_CONFIG: dict[str, dict] = {
 
 # ════════════════════════════════════════════════════════════════════════════════
 # EMBEDS
-# ════════════════════════════════════════════════════════════════════════════════
+# ═════���══════════════════════════════════════════════════════════════════════════
 
 def _base_embed(title: str = "", description: str = "") -> discord.Embed:
     embed = discord.Embed(title=title, description=description, color=DELTA_RED)
@@ -419,7 +420,7 @@ async def _finalize_ticket(
         pass
 
 
-# ════════��═══════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # MODALS
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -608,7 +609,7 @@ class TicketActionView(discord.ui.View):
         # Check if already claimed by this user
         is_claimed_by_user = self._claimed.get(channel.id) == member.id
         
-        # Allow leadership and any support role member who has access to this channel
+        # Allow: Delta Leadership (staff) or any support role member who has access to this channel
         topic = channel.topic or ""
         is_owner = str(member.id) in topic
         can_claim = (
